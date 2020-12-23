@@ -48,7 +48,7 @@ namespace SecurityDemo
                 {
                     { "bbs::list.boards", new Policy.Item()
                     {
-                        Allow_Roles = new string[] { "users" },
+                        Allow_Roles = new HashSet<string>() { "users" },
                         //Deny_Roles = null,
                         //Allow_Users = null,
                         //Deny_Users = null,
@@ -63,6 +63,7 @@ namespace SecurityDemo
             {
                 { ("rick", 8), new User() { ShopID = 8, UserID = "rick", Roles = new HashSet<string>() { "users" } } },
                 { ("andrew", 9527), new User() { ShopID = 9527, UserID = "andrew", Roles = new HashSet<string>() { "users", "power_users" } } },
+                { ("boris", 9527), new User() { ShopID = 9527, UserID = "boris", Roles = new HashSet<string>() { "users" } } },
             };
 
             groups = new Dictionary<(string name, int shop), Group>()
@@ -85,7 +86,7 @@ namespace SecurityDemo
                 {
                     { "bbs::list.boards", new Policy.Item()
                     {
-                        Deny_Users = new string[] { "rick" }
+                        Deny_Users = new HashSet<string>() { "boris" }
                     } }
                 }
             });
@@ -126,32 +127,56 @@ namespace SecurityDemo
         }
 
 
-        static bool HasPermission(SessionToken who, string action)
+        static bool HasPermission(SessionToken who, string domain_action)
         {
 
             // search sequence:
             // 1. shop customized policy
             // 2. domain service default (built-in)
 
-            string[] segments = action.Split("::");
+            (string domain, string action) = _name_parser(domain_action);
 
-            string policyname = $"{segments[0]}::default";
-            if (policies.ContainsKey((policyname, who.ShopID)))
+
+            bool deny = false;
+            bool allow = false;
+
+            if (policies.ContainsKey(($"{domain}::default", who.ShopID)))
             {
-                if (policies[(policyname, who.ShopID)].PolicyActionItems.ContainsKey(action))
+                var items = policies[($"{domain}::default", who.ShopID)].PolicyActionItems;
+                if (items.ContainsKey(domain_action))
                 {
-                    
+                    if (items[domain_action].Deny_Users != null && items[domain_action].Deny_Users.Contains(who.UserID)) deny = true;
+                    if (items[domain_action].Deny_Roles != null && items[domain_action].Deny_Roles.Overlaps(who.Roles)) deny = true;
+                    if (items[domain_action].Allow_Users != null && items[domain_action].Allow_Users.Contains(who.UserID)) allow = true;
+                    if (items[domain_action].Allow_Roles != null && items[domain_action].Allow_Roles.Overlaps(who.Roles)) allow = true;
                 }
             }
 
+            if (policies.ContainsKey(($"{domain}::default", 0)))
+            {
+                var items = policies[($"{domain}::default", 0)].PolicyActionItems;
+                if (items.ContainsKey(domain_action))
+                {
+                    if (items[domain_action].Deny_Users != null && items[domain_action].Deny_Users.Contains(who.UserID)) deny = true;
+                    if (items[domain_action].Deny_Roles != null && items[domain_action].Deny_Roles.Overlaps(who.Roles)) deny = true;
+                    if (items[domain_action].Allow_Users != null && items[domain_action].Allow_Users.Contains(who.UserID)) allow = true;
+                    if (items[domain_action].Allow_Roles != null && items[domain_action].Allow_Roles.Overlaps(who.Roles)) allow = true;
+                }
+            }
 
-
-            throw new NotImplementedException();
+            return (allow == true && deny == false);
         }
 
         static bool HasPermission(SessionToken who, string resource, string action)
         {
             throw new NotImplementedException();
+        }
+
+        private static (string domain, string action) _name_parser(string name)
+        {
+            string[] segments = name.Split("::", 2);
+
+            return (segments[0], segments[1]);
         }
 
 
@@ -165,7 +190,15 @@ namespace SecurityDemo
         // 基本展示: 存取 BBS feature(s)
         static void Demo1()
         {
+            var user = users[("boris", 9527)];
+            SessionToken me = new SessionToken()
+            {
+                ShopID = user.ShopID,
+                UserID = user.UserID,
+                Roles = user.Roles
+            };
 
+            Console.WriteLine($"* {user.UserID} try to access: [bbs::list.boards] => ..." + HasPermission(me, "bbs::list.boards"));
         }
     }
 
@@ -209,11 +242,11 @@ namespace SecurityDemo
 
         public class Item
         {
-            public string[] Allow_Users;
-            public string[] Allow_Roles;
+            public HashSet<string> Allow_Users;
+            public HashSet<string> Allow_Roles;
 
-            public string[] Deny_Users;
-            public string[] Deny_Roles;
+            public HashSet<string> Deny_Users;
+            public HashSet<string> Deny_Roles;
         }
     }
 
