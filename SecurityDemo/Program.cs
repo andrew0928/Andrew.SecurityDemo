@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace SecurityDemo
 {
@@ -33,9 +34,9 @@ namespace SecurityDemo
                 "bbs::list.boards",
                 "bbs::manage.boards",
 
-                "bbs::resources/host",
-                "bbs::resources/user",
-                "bbs::resources/viewer"
+                "bbs::boards/tags/host",    // can admin boards
+                "bbs::boards/tags/user",    // can read and post
+                "bbs::boards/tags/viewer",  // can read
             };
 
             policies = new Dictionary<(string name, int shop), Policy>();
@@ -50,9 +51,22 @@ namespace SecurityDemo
                     { "bbs::list.boards", new Policy.Item()
                     {
                         Allow_Roles = new HashSet<string>() { "users" },
-                        //Deny_Roles = null,
-                        //Allow_Users = null,
-                        //Deny_Users = null,
+                    } },
+                    { "bbs::manage.boards", new Policy.Item()
+                    {
+                        Allow_Roles = new HashSet<string>() { "administrators" },
+                    } },
+                    { "bbs::boards/tags/host", new Policy.Item()
+                    {
+                        Allow_Roles = new HashSet<string>() { "administrators" },
+                    } },
+                    { "bbs::boards/tags/user", new Policy.Item()
+                    {
+                        Allow_Roles = new HashSet<string>() { "users" },
+                    } },
+                    { "bbs::boards/tags/viewer", new Policy.Item()
+                    {
+                        Allow_Roles = new HashSet<string>() { "users" },
                     } },
                 },
             });
@@ -128,6 +142,125 @@ namespace SecurityDemo
         }
 
 
+
+
+
+        static void Main(string[] args)
+        {
+            Init();
+
+            //Demo1();  // basic PBAC test
+            //Demo2();  // full managed resource PBAC test
+            Demo3();    // basic managed resource ABAC test
+        }
+
+        // 基本展示: 存取 BBS feature(s)
+        static void Demo1()
+        {
+            var user = users[("boris", 9527)];
+            SessionToken me = new SessionToken()
+            {
+                ShopID = user.ShopID,
+                UserID = user.UserID,
+                Roles = user.Roles
+            };
+
+            Console.WriteLine($"* {user.UserID} try to access: [bbs::list.boards] => ..." + HasPermission(me, "bbs::list.boards"));
+        }
+
+        static void Demo2()
+        {
+            // init boards permissions
+            policies[("bbs::default", 9527)].PolicyActionItems["bbs::boards/1/host"] = new Policy.Item()
+            {
+                Allow_Roles = new HashSet<string>() { "administrators" },
+                Allow_Users = new HashSet<string>() { "andrew" }
+            };
+            policies[("bbs::default", 9527)].PolicyActionItems["bbs::boards/2/host"] = new Policy.Item()
+            {
+                Allow_Roles = new HashSet<string>() { "administrators" },
+                Allow_Users = new HashSet<string>() { "rick" }
+            };
+            policies[("bbs::default", 9527)].PolicyActionItems["bbs::boards/3/host"] = new Policy.Item()
+            {
+                Allow_Roles = new HashSet<string>() { "administrators" },
+                Allow_Users = new HashSet<string>() { "boris" }
+            };
+
+
+            var user = users[("boris", 9527)];
+            SessionToken me = new SessionToken()
+            {
+                ShopID = user.ShopID,
+                UserID = user.UserID,
+                Roles = user.Roles
+            };
+
+            Console.WriteLine($"* {user.UserID} try to access: [bbs::boards/1/host] => ..." + HasPermission(me, "bbs::boards", 1, "host"));
+            Console.WriteLine($"* {user.UserID} try to access: [bbs::boards/2/host] => ..." + HasPermission(me, "bbs::boards", 2, "host"));
+            Console.WriteLine($"* {user.UserID} try to access: [bbs::boards/3/host] => ..." + HasPermission(me, "bbs::boards", 3, "host"));
+        }
+
+
+
+        static void Demo3()
+        {
+            // init boards permissions
+            BBS_Board[] boards = new BBS_Board[]
+            {
+                new BBS_Board()
+                {
+                    Id = 1, Name = "UPD: Host talk",
+                    ActionTags = new HashSet<string>() { "host" },
+                },
+                new BBS_Board()
+                {
+                    Id = 2, Name = "UPD: User talk",
+                    ActionTags = new HashSet<string>() { "user" },
+                },
+                new BBS_Board()
+                {
+                    Id = 3, Name = "UPD: Viewer talk",
+                    ActionTags = new HashSet<string>() { "viewer" },
+                },
+                new BBS_Board()
+                {
+                    Id = 4, Name = "UPD: Manager talk",
+                    ActionTags = new HashSet<string>() { },
+                },
+                new BBS_Board()
+                {
+                    Id = 5, Name = "UPD: VP talk",
+                    ActionTags = new HashSet<string>() { },
+                },
+            };
+
+            var user = users[("boris", 9527)];
+            SessionToken me = new SessionToken()
+            {
+                ShopID = user.ShopID,
+                UserID = user.UserID,
+                Roles = user.Roles
+            };
+
+            var tags = new HashSet<string>(GetGrantedResourceActionTags(me, "bbs::boards"));
+
+            Console.WriteLine($"{me.UserID} can visit those boards:");
+            foreach(var board in (from b in boards where b.ActionTags.Overlaps(tags) select b))
+            {
+                Console.WriteLine($"* board: {board.Id} / {board.Name}, tags: {board.ActionTags}");
+            }
+        }
+
+
+
+
+
+
+        // text formatting, text parser, helper function ...
+
+
+
         static bool HasPermission(SessionToken who, string domain_action)
         {
 
@@ -138,7 +271,7 @@ namespace SecurityDemo
             (string domain, string action) = _name_parser(domain_action);
 
 
-            bool deny = false;
+            //bool deny = false;
             bool allow = false;
 
             if (policies.ContainsKey(($"{domain}::default", who.ShopID)))
@@ -146,8 +279,8 @@ namespace SecurityDemo
                 var items = policies[($"{domain}::default", who.ShopID)].PolicyActionItems;
                 if (items.ContainsKey(domain_action))
                 {
-                    if (items[domain_action].Deny_Users != null && items[domain_action].Deny_Users.Contains(who.UserID)) deny = true;
-                    if (items[domain_action].Deny_Roles != null && items[domain_action].Deny_Roles.Overlaps(who.Roles)) deny = true;
+                    if (items[domain_action].Deny_Users != null && items[domain_action].Deny_Users.Contains(who.UserID)) return false; //deny = true;
+                    if (items[domain_action].Deny_Roles != null && items[domain_action].Deny_Roles.Overlaps(who.Roles)) return false;  //deny = true;
                     if (items[domain_action].Allow_Users != null && items[domain_action].Allow_Users.Contains(who.UserID)) allow = true;
                     if (items[domain_action].Allow_Roles != null && items[domain_action].Allow_Roles.Overlaps(who.Roles)) allow = true;
                 }
@@ -158,14 +291,14 @@ namespace SecurityDemo
                 var items = policies[($"{domain}::default", 0)].PolicyActionItems;
                 if (items.ContainsKey(domain_action))
                 {
-                    if (items[domain_action].Deny_Users != null && items[domain_action].Deny_Users.Contains(who.UserID)) deny = true;
-                    if (items[domain_action].Deny_Roles != null && items[domain_action].Deny_Roles.Overlaps(who.Roles)) deny = true;
+                    if (items[domain_action].Deny_Users != null && items[domain_action].Deny_Users.Contains(who.UserID)) return false;  //deny = true;
+                    if (items[domain_action].Deny_Roles != null && items[domain_action].Deny_Roles.Overlaps(who.Roles)) return false;  //deny = true;
                     if (items[domain_action].Allow_Users != null && items[domain_action].Allow_Users.Contains(who.UserID)) allow = true;
                     if (items[domain_action].Allow_Roles != null && items[domain_action].Allow_Roles.Overlaps(who.Roles)) allow = true;
                 }
             }
 
-            return (allow == true && deny == false);
+            return (allow == true);
         }
 
         static bool HasPermission(SessionToken who, string domain_resource, int resourceId, string resourceAction)
@@ -187,40 +320,18 @@ namespace SecurityDemo
             {
                 if (action.StartsWith($"{domain}::{resource}/tags/") == false) continue;    // action not match, bypass
                 if (HasPermission(who, action) == false) continue;                          // action not granted, bypass
-                
+
                 yield return action.Substring($"{domain}::{resource}/tags/".Length);        // return granted action tags
             }
         }
 
 
 
-        static void Main(string[] args)
-        {
-            Init();
-
-            Demo1();
-        }
-
-        // 基本展示: 存取 BBS feature(s)
-        static void Demo1()
-        {
-            var user = users[("boris", 9527)];
-            SessionToken me = new SessionToken()
-            {
-                ShopID = user.ShopID,
-                UserID = user.UserID,
-                Roles = user.Roles
-            };
-
-            Console.WriteLine($"* {user.UserID} try to access: [bbs::list.boards] => ..." + HasPermission(me, "bbs::list.boards"));
-        }
 
 
 
 
 
-
-        // text formatting, text parser, helper function ...
         private static (string domain, string action) _name_parser(string name)
         {
             string[] segments = name.Split("::", 2);
@@ -248,49 +359,18 @@ namespace SecurityDemo
 
 
 
-    public class SessionToken
-    {
-        public int ShopID;
-        public string UserID;
-        public HashSet<string> Roles;
 
-        // extensions: login ip, expire time .... etc
-    }
 
-    public class User
-    {
-        public int ShopID;
-        public string UserID;
-        public HashSet<string> Roles;
-    }
 
-    public class Group
+
+
+    public class BBS_Board
     {
-        public int ShopID;
+        public int Id;
+
         public string Name;
+
+        public HashSet<string> ActionTags;
     }
-
-    public class Policy
-    {
-        public string PolicyID;
-        public PolicyTypeEnum Type;
-        public int ShopID;
-
-        public Dictionary<string, Item> PolicyActionItems;
-
-        public class Item
-        {
-            public HashSet<string> Allow_Users;
-            public HashSet<string> Allow_Roles;
-
-            public HashSet<string> Deny_Users;
-            public HashSet<string> Deny_Roles;
-        }
-    }
-
-    public enum PolicyTypeEnum
-    {
-        DS_BUILT_IN = 1,
-        DS_SHOP = 2,
-    }
+    
 }
