@@ -10,7 +10,7 @@ namespace SecurityDemo
         static Dictionary<(string name, int shop), Group> groups = null;
 
         // domain service: features 與 action 的對應
-        static Dictionary<string, string> features = null;
+        //static Dictionary<string, string> features = null;
 
         
         static HashSet<string> actions = null;
@@ -21,11 +21,12 @@ namespace SecurityDemo
         {
             // 以下是 domain service 註冊時就要產生的資料
 
-            features = new Dictionary<string, string>()
-            {
-                { "bbs::view", "bbs::list.boards" },
-                { "bbs::admin", "bbs::manage.boards" }
-            };
+
+            //features = new Dictionary<string, string>()
+            //{
+            //    { "bbs::view", "bbs::list.boards" },
+            //    { "bbs::admin", "bbs::manage.boards" }
+            //};
 
             actions = new HashSet<string>()
             {
@@ -86,7 +87,7 @@ namespace SecurityDemo
                 {
                     { "bbs::list.boards", new Policy.Item()
                     {
-                        Deny_Users = new HashSet<string>() { "boris" }
+                        //Deny_Users = new HashSet<string>() { "boris" }
                     } }
                 }
             });
@@ -167,17 +168,30 @@ namespace SecurityDemo
             return (allow == true && deny == false);
         }
 
-        static bool HasPermission(SessionToken who, string resource, string action)
+        static bool HasPermission(SessionToken who, string domain_resource, int resourceId, string resourceAction)
         {
-            throw new NotImplementedException();
+            //  {domain service}::{resource name}/{resource id}/{resource action} - 綁定 full managed resource 用的 action
+            (string domain, string resource) = _name_parser(domain_resource);
+
+            // TODO: check resourceId exist
+
+            return HasPermission(who, $"{domain}::{resource}/{resourceId}/{resourceAction}");
         }
 
-        private static (string domain, string action) _name_parser(string name)
+        static IEnumerable<string> GetGrantedResourceActionTags(SessionToken who, string domain_resource)
         {
-            string[] segments = name.Split("::", 2);
+            //  {domain service}::{resource name}/tags/{action tags} - 對應的 resource 支援的 action tags (static, 開發時可以決定)
+            (string domain, string resource) = _name_parser(domain_resource);
 
-            return (segments[0], segments[1]);
+            foreach (var action in actions)
+            {
+                if (action.StartsWith($"{domain}::{resource}/tags/") == false) continue;    // action not match, bypass
+                if (HasPermission(who, action) == false) continue;                          // action not granted, bypass
+                
+                yield return action.Substring($"{domain}::{resource}/tags/".Length);        // return granted action tags
+            }
         }
+
 
 
         static void Main(string[] args)
@@ -200,6 +214,30 @@ namespace SecurityDemo
 
             Console.WriteLine($"* {user.UserID} try to access: [bbs::list.boards] => ..." + HasPermission(me, "bbs::list.boards"));
         }
+
+
+
+
+
+
+        // text formatting, text parser, helper function ...
+        private static (string domain, string action) _name_parser(string name)
+        {
+            string[] segments = name.Split("::", 2);
+
+            return (segments[0], segments[1]);
+        }
+
+        
+
+        // policy (key: id + shop)
+        //  {domain service}::default   - 預設 policy name
+        //  policy search 順序: *[portal global] -> *[shop: global] -> [domain service default] -> [shop: domain service]
+
+        // action:
+        //  {domain service}::{action}  - 基本 basic action name (static, 開發時可以決定)
+        //  {domain service}::{resource name}/tags/{action tags} - 對應的 resource 支援的 action tags (static, 開發時可以決定)
+        //  {domain service}::{resource name}/{resource id}/{resource action} - 綁定 full managed resource 用的 action
     }
 
 
